@@ -1,90 +1,123 @@
 package cache
 
 import (
-    "errors"
-    "fmt"
-    "sync"
-    "testing"
+	"errors"
+	"fmt"
+	"sync"
+	"testing"
+	"time"
 )
 
 func TestSetAndGet(t *testing.T) {
-    c := New()
+	c := New()
 
-    if err := c.Set("name", "mukul"); err != nil {
-        t.Fatalf("unexpected error from Set: %v", err)
-    }
+	if err := c.Set("name", "mukul", 0); err != nil {
+		t.Fatalf("unexpected error from Set: %v", err)
+	}
 
-    val, err := c.Get("name")
-    if err != nil {
-        t.Fatalf("unexpected error from Get: %v", err)
-    }
+	val, err := c.Get("name")
+	if err != nil {
+		t.Fatalf("unexpected error from Get: %v", err)
+	}
 
-    if val != "mukul" {
-        t.Fatalf("unexpected value: got=%v want=%v", val, "mukul")
-    }
+	if val != "mukul" {
+		t.Fatalf("unexpected value: got=%v want=%v", val, "mukul")
+	}
 }
 
 func TestGetMissing(t *testing.T) {
-    c := New()
+	c := New()
 
-    _, err := c.Get("age")
-    if !errors.Is(err, ErrNotFound) {
-        t.Fatalf("expected ErrNotFound, got: %v", err)
-    }
+	_, err := c.Get("age")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got: %v", err)
+	}
 }
 
 func TestDelete(t *testing.T) {
-    c := New()
+	c := New()
 
-    if err := c.Set("age", 56); err != nil {
-        t.Fatalf("unexpected error from Set: %v", err)
-    }
+	if err := c.Set("age", 56, 0); err != nil {
+		t.Fatalf("unexpected error from Set: %v", err)
+	}
 
-    if err := c.Delete("age"); err != nil {
-        t.Fatalf("unexpected error from Delete: %v", err)
-    }
+	if err := c.Delete("age"); err != nil {
+		t.Fatalf("unexpected error from Delete: %v", err)
+	}
 
-    _, err := c.Get("age")
-    if !errors.Is(err, ErrNotFound) {
-        t.Fatalf("expected ErrNotFound after delete, got: %v", err)
-    }
+	_, err := c.Get("age")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after delete, got: %v", err)
+	}
 }
 
 func TestOverwrite(t *testing.T) {
-    c := New()
+	c := New()
 
-    if err := c.Set("age", 56); err != nil {
-        t.Fatalf("unexpected error from first Set: %v", err)
-    }
+	if err := c.Set("age", 56, 0); err != nil {
+		t.Fatalf("unexpected error from first Set: %v", err)
+	}
 
-    if err := c.Set("age", 45); err != nil {
-        t.Fatalf("unexpected error from second Set: %v", err)
-    }
+	if err := c.Set("age", 45, 0); err != nil {
+		t.Fatalf("unexpected error from second Set: %v", err)
+	}
 
-    val, err := c.Get("age")
-    if err != nil {
-        t.Fatalf("unexpected error from Get: %v", err)
-    }
+	val, err := c.Get("age")
+	if err != nil {
+		t.Fatalf("unexpected error from Get: %v", err)
+	}
 
-    if val != 45 {
-        t.Fatalf("unexpected value: got=%v want=%v", val, 45)
-    }
+	if val != 45 {
+		t.Fatalf("unexpected value: got=%v want=%v", val, 45)
+	}
 }
 
 func TestConcurrent(t *testing.T) {
-    c := New()
+	c := New()
 
-    var wg sync.WaitGroup
-    for i := 0; i < 100; i++ {
-        i := i
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-            key := fmt.Sprintf("key%d", i)
-            _ = c.Set(key, "mukul")
-            _, _ = c.Get(key)
-        }()
-    }
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("key%d", i)
+			_ = c.Set(key, "mukul", 0)
+			_, _ = c.Get(key)
+		}()
+	}
 
-    wg.Wait()
+	wg.Wait()
+}
+
+func TestGetExpired(t *testing.T) {
+	c := New()
+
+	if err := c.Set("token", "abc", 50*time.Millisecond); err != nil {
+		t.Fatalf("unexpected error from Set: %v", err)
+	}
+
+	time.Sleep(80 * time.Millisecond)
+
+	_, err := c.Get("token")
+	if !errors.Is(err, ErrExpired) {
+		t.Fatalf("expected ErrExpired, got: %v", err)
+	}
+}
+
+func TestGetBeforeExpiry(t *testing.T) {
+	c := New()
+
+	if err := c.Set("token", "abc", 200*time.Millisecond); err != nil {
+		t.Fatalf("unexpected error from Set: %v", err)
+	}
+
+	val, err := c.Get("token")
+	if err != nil {
+		t.Fatalf("unexpected error from Get: %v", err)
+	}
+
+	if val != "abc" {
+		t.Fatalf("unexpected value: got=%v want=%v", val, "abc")
+	}
 }

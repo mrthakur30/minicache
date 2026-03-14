@@ -2,40 +2,63 @@ package cache
 
 import (
 	"sync"
+	"time"
 )
 
 type Cache struct {
 	mu sync.RWMutex
-	items map[string]any
+	items map[string]Item
 }
 
+type Item struct{
+	Value any
+	ExpiresAt time.Time
+}
 
 func New() *Cache {
 	return &Cache{
-		items : make(map[string]any),
+		items : make(map[string]Item),
 	}
 }
 
-func (c *Cache) Set(key string, value any) error {
+func (c *Cache) Set(key string, value any, ttl time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-    c.items[key] = value
+	var expiresAt time.Time
+
+	if ttl > 0 {
+         expiresAt = time.Now().Add(ttl)
+	}
+
+    c.items[key] = Item{
+		Value : value, 
+		ExpiresAt: expiresAt,
+	}
 
 	return nil
 }
 
 func (c *Cache) Get(key string) (any, error){
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	val, ok := c.items[key] 
+	item, ok := c.items[key] 
+	c.mu.RUnlock()
 
 	if !ok {
 		  return nil, ErrNotFound
 	}
 
-	return val, nil
+	if !item.ExpiresAt.IsZero() && time.Now().After(item.ExpiresAt) {
+		 c.mu.Lock()
+    defer c.mu.Unlock()
+
+    if cur, ok := c.items[key]; ok && !cur.ExpiresAt.IsZero() && time.Now().After(cur.ExpiresAt) {
+        delete(c.items, key)
+    }
+    return nil, ErrExpired
+	}
+
+	return item.Value, nil
 }
 
 func (c *Cache) Delete(key string) error {
