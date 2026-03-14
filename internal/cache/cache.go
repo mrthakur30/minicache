@@ -8,6 +8,9 @@ import (
 type Cache struct {
 	mu sync.RWMutex
 	items map[string]Item
+	done  chan struct{}
+	interval time.Duration
+	closeOnce sync.Once
 }
 
 type Item struct{
@@ -16,9 +19,48 @@ type Item struct{
 }
 
 func New() *Cache {
-	return &Cache{
+	c :=  &Cache{
 		items : make(map[string]Item),
+		done:     make(chan struct{}),
+		interval: time.Second,
 	}
+	go c.startEviction()
+	return c 
+}
+
+func (c *Cache) startEviction(){
+    ticker := time.NewTicker(c.interval)
+
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <- ticker.C:
+			c.deleteExpired()
+		case <- c.done:
+			return
+		}
+	}
+}
+
+func (c *Cache) deleteExpired(){
+	now := time.Now()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for key, item := range c.items {
+		if !item.ExpiresAt.IsZero() && now.After(item.ExpiresAt){
+			delete(c.items,key)
+		}
+	}
+}
+
+func (c *Cache) Close() error {
+	c.closeOnce.Do(func() {
+        close(c.done)
+    })
+	return nil
 }
 
 func (c *Cache) Set(key string, value any, ttl time.Duration) error {
@@ -33,7 +75,7 @@ func (c *Cache) Set(key string, value any, ttl time.Duration) error {
 
     c.items[key] = Item{
 		Value : value, 
-		ExpiresAt: expiresAt,
+		ExpiresAt: expiresAt, 
 	}
 
 	return nil

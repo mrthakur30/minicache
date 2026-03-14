@@ -121,3 +121,23 @@ func TestGetBeforeExpiry(t *testing.T) {
 		t.Fatalf("unexpected value: got=%v want=%v", val, "abc")
 	}
 }
+
+
+func TestBackgroundEvictionRemovesExpiredItem(t *testing.T) {
+    c := New()
+    defer c.Close()
+
+    if err := c.Set("token", "abc", 50*time.Millisecond); err != nil {
+        t.Fatalf("set failed: %v", err)
+    }
+
+    time.Sleep(1200 * time.Millisecond) // enough for 1s ticker + expiry
+
+    c.mu.RLock()
+    _, ok := c.items["token"]
+    c.mu.RUnlock()
+
+    if ok {
+        t.Fatalf("expected expired item to be evicted")
+    }
+}
