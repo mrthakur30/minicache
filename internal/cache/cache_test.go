@@ -9,7 +9,7 @@ import (
 )
 
 func TestSetAndGet(t *testing.T) {
-	c := New()
+	c := New(WithEvictionInterval(20*time.Millisecond))
 
 	if err := c.Set("name", "mukul", 0); err != nil {
 		t.Fatalf("unexpected error from Set: %v", err)
@@ -139,5 +139,34 @@ func TestBackgroundEvictionRemovesExpiredItem(t *testing.T) {
 
     if ok {
         t.Fatalf("expected expired item to be evicted")
+    }
+}
+
+func TestCloseTwiceIsSafe(t *testing.T) {
+    c := New()
+    if err := c.Close(); err != nil {
+        t.Fatalf("first Close failed: %v", err)
+    }
+    if err := c.Close(); err != nil {
+        t.Fatalf("second Close failed: %v", err)
+    }
+}
+
+func TestBackgroundEvictionWithCustomInterval(t *testing.T) {
+    c := New(WithEvictionInterval(20 * time.Millisecond))
+    defer c.Close()
+
+    if err := c.Set("k", "v", 30*time.Millisecond); err != nil {
+        t.Fatalf("set failed: %v", err)
+    }
+
+    time.Sleep(120 * time.Millisecond)
+
+    c.mu.RLock()
+    _, ok := c.items["k"]
+    c.mu.RUnlock()
+
+    if ok {
+        t.Fatalf("expected key to be evicted")
     }
 }

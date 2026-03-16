@@ -18,12 +18,17 @@ type Item struct{
 	ExpiresAt time.Time
 }
 
-func New() *Cache {
+func New(opts ...Option) *Cache {
 	c :=  &Cache{
 		items : make(map[string]Item),
 		done:     make(chan struct{}),
 		interval: time.Second,
 	}
+
+	for _,opt := range opts {
+		opt(c)
+	}
+
 	go c.startEviction()
 	return c 
 }
