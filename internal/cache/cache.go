@@ -2,15 +2,47 @@ package cache
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
+
+
+
+
 type Cache struct {
-	mu sync.RWMutex
-	items map[string]Item
-	done  chan struct{}
-	interval time.Duration
+	
+	hits      uint64
+	misses    uint64
+	evictions uint64
+
+	mu        sync.RWMutex
+	items     map[string]Item
+	done      chan struct{}
+	interval  time.Duration
 	closeOnce sync.Once
+}
+
+type Stats struct {
+	Hits      uint64
+	Misses    uint64
+	Evictions uint64
+}
+
+func (s Stats) HitRatio() float64 {
+	total := s.Hits + s.Misses
+	if total == 0 {
+		return 0
+	}
+	return float64(s.Hits) / float64(total)
+}
+
+func (c *Cache) Stats() Stats {
+	return Stats{
+		Hits:      atomic.LoadUint64(&c.hits),
+		Misses:    atomic.LoadUint64(&c.misses),
+		Evictions: atomic.LoadUint64(&c.evictions),
+	}
 }
 
 type Item struct{
@@ -48,16 +80,22 @@ func (c *Cache) startEviction(){
 	}
 }
 
-func (c *Cache) deleteExpired(){
+func (c *Cache) deleteExpired() {
 	now := time.Now()
+	var evicted uint64
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for key, item := range c.items {
-		if !item.ExpiresAt.IsZero() && now.After(item.ExpiresAt){
-			delete(c.items,key)
+		if !item.ExpiresAt.IsZero() && now.After(item.ExpiresAt) {
+			delete(c.items, key)
+			evicted++
 		}
+	}
+
+	if evicted > 0 {
+		atomic.AddUint64(&c.evictions, evicted)
 	}
 }
 
@@ -92,19 +130,23 @@ func (c *Cache) Get(key string) (any, error){
 	c.mu.RUnlock()
 
 	if !ok {
-		  return nil, ErrNotFound
+		atomic.AddUint64(&c.misses, 1)
+		return nil, ErrNotFound
 	}
 
 	if !item.ExpiresAt.IsZero() && time.Now().After(item.ExpiresAt) {
-		 c.mu.Lock()
-    defer c.mu.Unlock()
+		c.mu.Lock()
+		defer c.mu.Unlock()
 
-    if cur, ok := c.items[key]; ok && !cur.ExpiresAt.IsZero() && time.Now().After(cur.ExpiresAt) {
-        delete(c.items, key)
-    }
-    return nil, ErrExpired
+		if cur, ok := c.items[key]; ok && !cur.ExpiresAt.IsZero() && time.Now().After(cur.ExpiresAt) {
+			delete(c.items, key)
+			atomic.AddUint64(&c.evictions, 1)
+		}
+		atomic.AddUint64(&c.misses, 1)
+		return nil, ErrExpired
 	}
 
+	atomic.AddUint64(&c.hits, 1)
 	return item.Value, nil
 }
 
